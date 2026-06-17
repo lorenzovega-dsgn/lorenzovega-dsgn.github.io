@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -103,13 +104,14 @@ canvas.thumb { flex-shrink: 0; border-radius: 3px; }
       <div class="section-label">Animation (Defaults)</div>
       <div class="ctrl-row">
         <div class="cg"><label>Frame (ms)</label><input type="number" id="inp-dur" value="600" min="100" max="5000" step="50"></div>
-        <div class="cg"><label>Flip steps</label><input type="number" id="inp-steps" value="3" min="1" max="8"></div>
+        <div class="cg"><label>Flip steps</label><input type="number" id="inp-steps" value="4" min="1" max="10"></div>
         <div class="cg"><label>Step (ms)</label><input type="number" id="inp-flip" value="80" min="20" max="300" step="10"></div>
         <div class="cg">
-          <label>Direction</label>
-          <select id="inp-flap-dir">
-            <option value="down">Flap down</option>
-            <option value="up">Flap up</option>
+          <label>Flip Style</label>
+          <select id="inp-flip-style">
+            <option value="flipdot">True Flip Dot (3D)</option>
+            <option value="scale">Scale (Size)</option>
+            <option value="iris">Iris (Radial)</option>
           </select>
         </div>
       </div>
@@ -162,9 +164,9 @@ canvas.thumb { flex-shrink: 0; border-radius: 3px; }
 <script>
 const S = {
   cols:12, rows:12, dotSize:22, dotGap:4,
-  frameDur:600, flipSteps:3, stepDur:80, exportScale:4,
+  frameDur:600, flipSteps:4, stepDur:80, exportScale:4,
   bgColor:'#ffffff', dotOn:'#111111', dotOff:'#cccccc',
-  gridStyle:'filled', flapDir:'down',
+  gridStyle:'filled', flipStyle:'flipdot',
   grid:[], frames:[], activeFrame:-1,
   drawing:false, drawValue:null
 };
@@ -191,52 +193,77 @@ function resizeCanvas(){
 }
 
 function easeInOut(t){ return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2; }
-function getStepTs(n){ return Array.from({length:n},(_,i)=>easeInOut((i+1)/(n+1))); }
 
-function drawSingleDot(context, cx, cy, r, value, transT, opts){
-  const {bgColor,dotOn,dotOff,gridStyle,flapDir} = opts;
-  if(transT !== null){
-    const fromColor = value===0 ? dotOn : dotOff;
-    const toColor   = value===0 ? dotOff : dotOn;
-    const splitY = flapDir==='down' ? cy + (-r + r*2*transT) : cy + (r - r*2*transT);
-    context.save();
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI*2);
-    context.clip();
-    context.fillStyle = fromColor;
-    context.fillRect(cx-r-1, cy-r-1, r*2+2, r*2+2);
-    if(flapDir==='down'){
-      context.fillStyle = toColor;
-      context.fillRect(cx-r-1, splitY, r*2+2, (cy+r+1)-splitY);
+// Modificado para ajustarse a los valores crudos independientes de la dirección
+function getStepTs(n, goingOff){
+  return Array.from({length:n},(_,i)=>{
+    const t = (i+1)/(n+1);
+    return goingOff ? t : 1 - t;
+  });
+}
+
+function drawSingleDot(context, cx, cy, r, value, transP, opts) {
+  const {bgColor, dotOn, dotOff, gridStyle, flipStyle} = opts;
+
+  // Si no hay animación intermedia (cuadro estático puro)
+  if (transP === null) {
+    if (value === 1) {
+      context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2);
+      context.fillStyle = dotOn; context.fill();
     } else {
-      context.fillStyle = toColor;
-      context.fillRect(cx-r-1, cy-r-1, r*2+2, splitY-(cy-r-1));
+      if (gridStyle === 'filled') {
+        context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2);
+        context.fillStyle = dotOff; context.fill();
+      } else if (gridStyle === 'outline') {
+        context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2);
+        context.strokeStyle = dotOff; context.lineWidth = Math.max(0.5, r * 0.12);
+        context.stroke();
+      }
     }
-    context.restore();
     return;
   }
-  if(value===1){
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI*2);
-    context.fillStyle = dotOn;
-    context.fill();
-  } else {
-    if(gridStyle==='filled'){
-      context.beginPath();
-      context.arc(cx, cy, r, 0, Math.PI*2);
-      context.fillStyle = dotOff;
-      context.fill();
-    } else if(gridStyle==='outline'){
-      context.beginPath();
-      context.arc(cx, cy, r, 0, Math.PI*2);
-      context.strokeStyle = dotOff;
-      context.lineWidth = Math.max(0.5, r*0.12);
-      context.stroke();
+
+  // Lógica exacta extraída de la simulación dot_scale_v3
+  if (flipStyle === 'scale') {
+    // 1. MÓDULO: SCALE (El círculo negro cambia de radio relativo)
+    const ei = easeInOut(transP);
+    const radius = r * (1 - ei);
+    
+    context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2);
+    context.fillStyle = dotOff; context.fill();
+    if (radius > 0.5) {
+      context.beginPath(); context.arc(cx, cy, radius, 0, Math.PI * 2);
+      context.fillStyle = dotOn; context.fill();
     }
+
+  } else if (flipStyle === 'flipdot') {
+    // 2. MÓDULO: TRUE FLIP DOT (Rotación elíptica 3D limpia)
+    const scaleY = Math.cos(transP * Math.PI);
+    const front = scaleY >= 0 ? dotOn : dotOff;
+    const back  = scaleY >= 0 ? dotOff : dotOn;
+    
+    context.save();
+    context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2); context.clip();
+    context.fillStyle = back; context.fillRect(cx - r - 1, cy - r - 1, r * 2 + 2, r * 2 + 2);
+    if (Math.abs(scaleY) > 0.01) {
+      context.beginPath(); context.ellipse(cx, cy, r, r * Math.abs(scaleY), 0, 0, Math.PI * 2);
+      context.fillStyle = front; context.fill();
+    }
+    context.restore();
+
+  } else if (flipStyle === 'iris') {
+    // 3. MÓDULO: IRIS (Obturador radial concéntrico)
+    const ei = easeInOut(transP);
+    context.save();
+    context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2); context.clip();
+    context.fillStyle = dotOn; context.fillRect(cx - r - 1, cy - r - 1, r * 2 + 2, r * 2 + 2);
+    context.beginPath(); context.arc(cx, cy, r * ei, 0, Math.PI * 2);
+    context.fillStyle = dotOff; context.fill();
+    context.restore();
   }
 }
 
-function getOpts(){ return {bgColor:S.bgColor,dotOn:S.dotOn,dotOff:S.dotOff,gridStyle:S.gridStyle,flapDir:S.flapDir}; }
+function getOpts(){ return {bgColor:S.bgColor,dotOn:S.dotOn,dotOff:S.dotOff,gridStyle:S.gridStyle,flipStyle:S.flipStyle}; }
 
 function drawGrid(transGrid){
   const p=pad(),g=S.dotGap,ds=S.dotSize;
@@ -245,6 +272,7 @@ function drawGrid(transGrid){
   const opts=getOpts();
   for(let r=0;r<S.rows;r++) for(let c=0;c<S.cols;c++){
     const x=p+c*(ds+g)+ds/2, y=p+r*(ds+g)+ds/2;
+    ctx.shadowBlur = 0; // Desactivar sombras globales de distorsión
     drawSingleDot(ctx,x,y,ds/2,S.grid[r][c],transGrid?transGrid[r][c]:null,opts);
   }
 }
@@ -288,11 +316,17 @@ function renderOffscreen(grid,cols,rows,dotSize,dotGap,transGrid,opts){
 }
 
 function buildTransGrids(fromGrid,toGrid,cols,rows,numSteps){
-  return getStepTs(numSteps).map(t=>
-    Array.from({length:rows},(_,r)=>
-      Array.from({length:cols},(_,c)=>fromGrid[r][c]===toGrid[r][c]?null:t)
-    )
-  );
+  // Determinamos los pasos incrementales según el cambio lógico (0=ON, 1=OFF)
+  return Array.from({length:numSteps},(_,stepIdx)=>{
+    return Array.from({length:rows},(_,r)=>
+      Array.from({length:cols},(_,c)=>{
+        if(fromGrid[r][c]===toGrid[r][c]) return null;
+        const goingOff = fromGrid[r][c] === 1; // 1 -> 0 es decreciente en la matriz lógica original
+        const steps = getStepTs(numSteps, goingOff);
+        return steps[stepIdx];
+      })
+    );
+  });
 }
 
 function renderThumb(grid,cols,rows){
@@ -307,21 +341,12 @@ function renderThumb(grid,cols,rows){
 function moveFrame(index, direction) {
   const targetIndex = index + direction;
   if (targetIndex < 0 || targetIndex >= S.frames.length) return;
-  
-  // Intercambiar fotogramas
   const temp = S.frames[index];
   S.frames[index] = S.frames[targetIndex];
   S.frames[targetIndex] = temp;
-  
-  // Si movimos el fotograma activo, seguir su rastro
-  if (S.activeFrame === index) {
-    S.activeFrame = targetIndex;
-  } else if (S.activeFrame === targetIndex) {
-    S.activeFrame = index;
-  }
-  
+  if (S.activeFrame === index) S.activeFrame = targetIndex;
+  else if (S.activeFrame === targetIndex) S.activeFrame = index;
   renderFrameList();
-  setStatus(`Frame moved to position ${targetIndex + 1}`);
 }
 
 function renderFrameList(){
@@ -331,11 +356,8 @@ function renderFrameList(){
   S.frames.forEach((f,i)=>{
     const row=document.createElement('div');
     row.className='frame-thumb-row'+(i===S.activeFrame?' active':'');
-    
-    // Miniatura
     row.appendChild(renderThumb(f.grid,f.cols,f.rows));
     
-    // Contenedor de Información e Input de duración
     const infoContainer = document.createElement('div');
     infoContainer.className = 'frame-info';
     
@@ -343,56 +365,34 @@ function renderFrameList(){
     lbl.className='frame-label'; lbl.textContent='Frame '+(i+1);
     infoContainer.appendChild(lbl);
     
-    // Input individual para duración
     const durInput = document.createElement('input');
     durInput.type = 'number';
     durInput.className = 'frame-dur-input';
     durInput.value = f.duration;
-    durInput.min = '50';
-    durInput.max = '10000';
-    durInput.step = '50';
-    durInput.title = 'Duration for this frame in ms';
+    durInput.min = '50'; durInput.max = '10000'; durInput.step = '50';
     
-    // Eventos para el input (evitar conflictos de clic en la fila)
     durInput.addEventListener('click', e => e.stopPropagation());
     durInput.addEventListener('input', e => {
       const val = parseInt(e.target.value);
-      if (val && val >= 50) {
-        f.duration = val;
-      }
+      if (val && val >= 50) f.duration = val;
     });
     infoContainer.appendChild(durInput);
     row.appendChild(infoContainer);
     
-    // Botones de orden (Subir / Bajar)
     const orderContainer = document.createElement('div');
     orderContainer.className = 'frame-order-btns';
     
     const upBtn = document.createElement('button');
-    upBtn.className = 'order-btn';
-    upBtn.textContent = '↑';
-    upBtn.disabled = (i === 0);
-    upBtn.title = 'Move Up';
-    upBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      moveFrame(i, -1);
-    });
+    upBtn.className = 'order-btn'; upBtn.textContent = '↑'; upBtn.disabled = (i === 0);
+    upBtn.addEventListener('click', e => { e.stopPropagation(); moveFrame(i, -1); });
     
     const downBtn = document.createElement('button');
-    downBtn.className = 'order-btn';
-    downBtn.textContent = '↓';
-    downBtn.disabled = (i === S.frames.length - 1);
-    downBtn.title = 'Move Down';
-    downBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      moveFrame(i, 1);
-    });
+    downBtn.className = 'order-btn'; downBtn.textContent = '↓'; downBtn.disabled = (i === S.frames.length - 1);
+    downBtn.addEventListener('click', e => { e.stopPropagation(); moveFrame(i, 1); });
     
-    orderContainer.appendChild(upBtn);
-    orderContainer.appendChild(downBtn);
+    orderContainer.appendChild(upBtn); orderContainer.appendChild(downBtn);
     row.appendChild(orderContainer);
     
-    // Clic en la fila para editar
     row.addEventListener('click',()=>{
       S.activeFrame=i; S.cols=f.cols; S.rows=f.rows; S.dotGap=f.dotGap??S.dotGap;
       S.grid=f.grid.map(r=>[...r]);
@@ -400,9 +400,7 @@ function renderFrameList(){
       document.getElementById('inp-rows').value=f.rows;
       document.getElementById('inp-gap').value=S.dotGap;
       resizeCanvas(); drawGrid(); renderFrameList();
-      setStatus('Editing frame '+(i+1));
     });
-    
     frameListEl.appendChild(row);
   });
 }
@@ -413,15 +411,9 @@ document.getElementById('btn-add-frame').addEventListener('click',()=>{
   const currentDefaultDur = parseInt(document.getElementById('inp-dur').value) || 600;
   
   S.frames.splice(idx,0,{
-    grid:copy,
-    cols:S.cols,
-    rows:S.rows,
-    dotGap:S.dotGap,
-    duration: currentDefaultDur // Guardar duración específica
+    grid:copy, cols:S.cols, rows:S.rows, dotGap:S.dotGap, duration: currentDefaultDur
   });
-  
   S.activeFrame=idx; renderFrameList();
-  setStatus('Frame '+(idx+1)+' added — '+S.frames.length+' total');
 });
 
 document.getElementById('btn-dup-frame').addEventListener('click',()=>{
@@ -429,13 +421,9 @@ document.getElementById('btn-dup-frame').addEventListener('click',()=>{
   if(i<0) return;
   const f=S.frames[i];
   S.frames.splice(i+1,0,{
-    grid:f.grid.map(r=>[...r]),
-    cols:f.cols,
-    rows:f.rows,
-    dotGap:f.dotGap,
-    duration: f.duration
+    grid:f.grid.map(r=>[...r]), cols:f.cols, rows:f.rows, dotGap:f.dotGap, duration: f.duration
   });
-  S.activeFrame=i+1; renderFrameList(); setStatus('Frame duplicated');
+  S.activeFrame=i+1; renderFrameList();
 });
 
 document.getElementById('btn-del-frame').addEventListener('click',()=>{
@@ -443,12 +431,12 @@ document.getElementById('btn-del-frame').addEventListener('click',()=>{
   const i=S.activeFrame>=0?S.activeFrame:S.frames.length-1;
   S.frames.splice(i,1);
   S.activeFrame=Math.min(i,S.frames.length-1);
-  renderFrameList(); setStatus('Frame deleted');
+  renderFrameList();
 });
 
-document.getElementById('btn-clear').addEventListener('click',()=>{ initGrid(); drawGrid(); setStatus('Cleared'); });
-document.getElementById('btn-fill').addEventListener('click',()=>{ S.grid=Array.from({length:S.rows},()=>Array(S.cols).fill(1)); drawGrid(); setStatus('Filled'); });
-document.getElementById('btn-invert').addEventListener('click',()=>{ S.grid=S.grid.map(r=>r.map(v=>1-v)); drawGrid(); setStatus('Inverted'); });
+document.getElementById('btn-clear').addEventListener('click',()=>{ initGrid(); drawGrid(); });
+document.getElementById('btn-fill').addEventListener('click',()=>{ S.grid=Array.from({length:S.rows},()=>Array(S.cols).fill(1)); drawGrid(); });
+document.getElementById('btn-invert').addEventListener('click',()=>{ S.grid=S.grid.map(r=>r.map(v=>1-v)); drawGrid(); });
 
 document.getElementById('btn-apply').addEventListener('click',()=>{
   S.cols=parseInt(document.getElementById('inp-cols').value)||12;
@@ -456,10 +444,10 @@ document.getElementById('btn-apply').addEventListener('click',()=>{
   S.dotSize=parseInt(document.getElementById('inp-dot').value)||22;
   S.dotGap=parseInt(document.getElementById('inp-gap').value)||4;
   S.frameDur=parseInt(document.getElementById('inp-dur').value)||600;
-  S.flipSteps=parseInt(document.getElementById('inp-steps').value)||3;
+  S.flipSteps=parseInt(document.getElementById('inp-steps').value)||4;
   S.stepDur=parseInt(document.getElementById('inp-flip').value)||80;
   S.exportScale=parseInt(document.getElementById('inp-scale').value)||4;
-  initGrid(); resizeCanvas(); drawGrid(); setStatus('Grid updated');
+  initGrid(); resizeCanvas(); drawGrid(); renderFrameList();
 });
 
 ['inp-bg','inp-dot-on','inp-dot-off'].forEach(id=>{
@@ -471,7 +459,7 @@ document.getElementById('btn-apply').addEventListener('click',()=>{
   });
 });
 document.getElementById('inp-grid-style').addEventListener('change',e=>{ S.gridStyle=e.target.value; drawGrid(); renderFrameList(); });
-document.getElementById('inp-flap-dir').addEventListener('change',e=>{ S.flapDir=e.target.value; });
+document.getElementById('inp-flip-style').addEventListener('change',e=>{ S.flipStyle=e.target.value; drawGrid(); });
 
 let previewTimer=null;
 const previewCvs=document.getElementById('preview-canvas');
@@ -480,7 +468,7 @@ const previewLabel=document.getElementById('preview-label');
 const previewOverlay=document.getElementById('preview-overlay');
 
 document.getElementById('btn-preview').addEventListener('click',()=>{
-  if(!S.frames.length){ setStatus('Add at least 1 frame first'); return; }
+  if(!S.frames.length){ return; }
   previewOverlay.classList.add('active'); runPreview();
 });
 document.getElementById('btn-close-preview').addEventListener('click',()=>{
@@ -499,9 +487,8 @@ function runPreview(){
   const opts=getOpts();
   const seq=[];
   
-  for(let i=0;i<frames.length;i++){
+  for(let i=0; i<frames.length; i++){
     const cur=frames[i], nxt=frames[(i+1)%frames.length];
-    // Usar la duración específica de este cuadro
     seq.push({img:renderOffscreen(cur.grid,cols,rows,ds,pg,null,opts),dur:cur.duration,label:'Frame '+(i+1)});
     buildTransGrids(cur.grid,nxt.grid,cols,rows,S.flipSteps).forEach((tg,si)=>{
       seq.push({img:renderOffscreen(cur.grid,cols,rows,ds,pg,tg,opts),dur:S.stepDur,label:'Flip '+(si+1)+'/'+S.flipSteps});
@@ -519,33 +506,26 @@ function runPreview(){
 }
 
 document.getElementById('btn-export').addEventListener('click',()=>{
-  if(!S.frames.length){ setStatus('Add at least 1 frame first'); return; }
+  if(!S.frames.length){ return; }
   setStatus('Building frames…'); setProgress(0);
 
   const frames=S.frames, cols=frames[0].cols, rows=frames[0].rows;
   const sc=S.exportScale, ds=sc*4;
   const dg=frames[0].dotGap??S.dotGap;
   const pg=Math.max(1,Math.round(dg*sc/2));
-  const p=pg[2]+2 || pg*2+2, w=cols*(ds+pg)+p, h=rows*(ds+pg)+p;
+  const p=pg*2+2, w=cols*(ds+pg)+p, h=rows*(ds+pg)+p;
   const opts=getOpts();
 
-  const workerCode = `
-    importScripts('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');
-  `;
+  const workerCode = `importScripts('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');`;
   const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
   const workerUrl = URL.createObjectURL(workerBlob);
 
   const gif = new GIF({
-    workers: 2,
-    quality: 1,
-    width: w,
-    height: h,
-    workerScript: workerUrl
+    workers: 2, quality: 1, width: w, height: h, workerScript: workerUrl
   });
 
   for(let i=0;i<frames.length;i++){
     const cur=frames[i], nxt=frames[(i+1)%frames.length];
-    // Usar la duración específica de este cuadro en el GIF final
     gif.addFrame(renderOffscreen(cur.grid,cols,rows,ds,pg,null,opts),{delay:cur.duration,copy:true});
     buildTransGrids(cur.grid,nxt.grid,cols,rows,S.flipSteps).forEach(tg=>{
       gif.addFrame(renderOffscreen(cur.grid,cols,rows,ds,pg,tg,opts),{delay:S.stepDur,copy:true});
@@ -558,23 +538,17 @@ document.getElementById('btn-export').addEventListener('click',()=>{
     const gifUrl = URL.createObjectURL(blob);
     
     const a=document.createElement('a');
-    a.href=gifUrl;
-    a.download=`flipdot_${Date.now()}.gif`;
-    a.click();
+    a.href=gifUrl; a.download=`flipdot_${Date.now()}.gif`; a.click();
     
     const item = document.createElement('div');
     item.className = 'gallery-item';
-    
     const img = document.createElement('img');
     img.src = gifUrl;
-    
     const meta = document.createElement('span');
     meta.textContent = `${w}×${h}px (${frames.length} f)`;
     
-    item.appendChild(img);
-    item.appendChild(meta);
+    item.appendChild(img); item.appendChild(meta);
     galleryListEl.insertBefore(item, galleryListEl.firstChild);
-
     setStatus('Exported successfully!');
   });
 
