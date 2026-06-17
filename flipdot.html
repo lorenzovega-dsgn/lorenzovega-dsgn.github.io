@@ -109,8 +109,9 @@ canvas.thumb { flex-shrink: 0; border-radius: 3px; }
         <div class="cg">
           <label>Flip Style</label>
           <select id="inp-flip-style">
-            <option value="flipdot">True Flip Dot (3D)</option>
             <option value="scale">Scale (Size)</option>
+            <option value="flipdot">True Flip Dot (3D)</option>
+            <option value="slide">Linear Slide (Original)</option>
             <option value="iris">Iris (Radial)</option>
           </select>
         </div>
@@ -166,7 +167,7 @@ const S = {
   cols:12, rows:12, dotSize:22, dotGap:4,
   frameDur:600, flipSteps:4, stepDur:80, exportScale:4,
   bgColor:'#ffffff', dotOn:'#111111', dotOff:'#cccccc',
-  gridStyle:'filled', flipStyle:'flipdot',
+  gridStyle:'filled', flipStyle:'scale',
   grid:[], frames:[], activeFrame:-1,
   drawing:false, drawValue:null
 };
@@ -194,9 +195,8 @@ function resizeCanvas(){
 
 function easeInOut(t){ return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2; }
 
-// Modificado para ajustarse a los valores crudos independientes de la dirección
 function getStepTs(n, goingOff){
-  return Array.from({length:n},(_,i)=>{
+  return Array.from({length:n},(_, i)=>{
     const t = (i+1)/(n+1);
     return goingOff ? t : 1 - t;
   });
@@ -205,7 +205,6 @@ function getStepTs(n, goingOff){
 function drawSingleDot(context, cx, cy, r, value, transP, opts) {
   const {bgColor, dotOn, dotOff, gridStyle, flipStyle} = opts;
 
-  // Si no hay animación intermedia (cuadro estático puro)
   if (transP === null) {
     if (value === 1) {
       context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2);
@@ -223,9 +222,19 @@ function drawSingleDot(context, cx, cy, r, value, transP, opts) {
     return;
   }
 
-  // Lógica exacta extraída de la simulación dot_scale_v3
-  if (flipStyle === 'scale') {
-    // 1. MÓDULO: SCALE (El círculo negro cambia de radio relativo)
+  if (flipStyle === 'slide') {
+    const fromColor = value === 0 ? dotOn : dotOff;
+    const toColor   = value === 0 ? dotOff : dotOn;
+    const currentStepT = value === 0 ? transP : (1 - transP);
+    const splitY = cy + (-r + r * 2 * currentStepT);
+    
+    context.save();
+    context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2); context.clip();
+    context.fillStyle = fromColor; context.fillRect(cx - r - 1, cy - r - 1, r * 2 + 2, r * 2 + 2);
+    context.fillStyle = toColor;   context.fillRect(cx - r - 1, splitY, r * 2 + 2, (cy + r + 1) - splitY);
+    context.restore();
+
+  } else if (flipStyle === 'scale') {
     const ei = easeInOut(transP);
     const radius = r * (1 - ei);
     
@@ -237,7 +246,6 @@ function drawSingleDot(context, cx, cy, r, value, transP, opts) {
     }
 
   } else if (flipStyle === 'flipdot') {
-    // 2. MÓDULO: TRUE FLIP DOT (Rotación elíptica 3D limpia)
     const scaleY = Math.cos(transP * Math.PI);
     const front = scaleY >= 0 ? dotOn : dotOff;
     const back  = scaleY >= 0 ? dotOff : dotOn;
@@ -252,7 +260,6 @@ function drawSingleDot(context, cx, cy, r, value, transP, opts) {
     context.restore();
 
   } else if (flipStyle === 'iris') {
-    // 3. MÓDULO: IRIS (Obturador radial concéntrico)
     const ei = easeInOut(transP);
     context.save();
     context.beginPath(); context.arc(cx, cy, r, 0, Math.PI * 2); context.clip();
@@ -272,7 +279,7 @@ function drawGrid(transGrid){
   const opts=getOpts();
   for(let r=0;r<S.rows;r++) for(let c=0;c<S.cols;c++){
     const x=p+c*(ds+g)+ds/2, y=p+r*(ds+g)+ds/2;
-    ctx.shadowBlur = 0; // Desactivar sombras globales de distorsión
+    ctx.shadowBlur = 0;
     drawSingleDot(ctx,x,y,ds/2,S.grid[r][c],transGrid?transGrid[r][c]:null,opts);
   }
 }
@@ -316,12 +323,11 @@ function renderOffscreen(grid,cols,rows,dotSize,dotGap,transGrid,opts){
 }
 
 function buildTransGrids(fromGrid,toGrid,cols,rows,numSteps){
-  // Determinamos los pasos incrementales según el cambio lógico (0=ON, 1=OFF)
   return Array.from({length:numSteps},(_,stepIdx)=>{
     return Array.from({length:rows},(_,r)=>
       Array.from({length:cols},(_,c)=>{
         if(fromGrid[r][c]===toGrid[r][c]) return null;
-        const goingOff = fromGrid[r][c] === 1; // 1 -> 0 es decreciente en la matriz lógica original
+        const goingOff = fromGrid[r][c] === 1; 
         const steps = getStepTs(numSteps, goingOff);
         return steps[stepIdx];
       })
